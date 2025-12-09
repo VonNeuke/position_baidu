@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>经纬度转地理位置</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+</head>
+<body>
+<main class="container">
+  <h1>经纬度转地理位置信息</h1>
+  <p>上传Excel并配置列后生成地址列。</p>
+  <form action="/process" method="post" enctype="multipart/form-data">
+    <fieldset>
+      <label>Excel 文件<input type="file" name="file" accept=".xlsx,.xls" required></label>
+      <label>百度地图 AK<input type="text" name="ak" placeholder="可留空使用环境变量"></label>
+      <label>纬度列名<input type="text" name="lat_col" placeholder="例如 lat" required></label>
+      <label>经度列名<input type="text" name="lng_col" placeholder="例如 lng" required></label>
+      <label>输出地址列名<input type="text" name="addr_col" placeholder="例如 address" required></label>
+      <label>坐标类型
+        <select name="coordtype">
+          <option value="wgs84ll" selected>WGS84</option>
+          <option value="bd09ll">BD-09</option>
+          <option value="gcj02">GCJ-02</option>
+        </select>
+      </label>
+    </fieldset>
+    <button type="submit">生成</button>
+  </form>
+  <footer><small>不保存数据，处理后直接下载。</small></footer>
+ </main>
+</body>
+</html>
