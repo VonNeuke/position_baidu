@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>经纬度转地址 - 纯前端版</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <style>
+        body {
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 150px;
+        }
+        #resultTable {
+            margin-top: 20px;
+        }
+        #loading {
+            display: none;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">经纬度转地址</h1>
+        
+        <div class="mb-3">
+            <label for="latLngInput" class="form-label">经纬度输入（每行一个，格式：纬度,经度）</label>
+            <textarea class="form-control" id="latLngInput" placeholder="例如：
+39.9042,116.4074
+22.5431,114.0579
+31.2304,121.4737"></textarea>
+        </div>
+        
+        <div class="mb-3">
+            <label for="akInput" class="form-label">百度地图AK</label>
+            <input type="text" class="form-control" id="akInput" placeholder="请输入您的百度地图AK">
+            <div class="form-text">
+                <a href="https://lbsyun.baidu.com/apiconsole/key#/home" target="_blank">获取百度地图AK</a>
+            </div>
+        </div>
+        
+        <div class="mb-3">
+            <button class="btn btn-primary" id="convertBtn">转换地址</button>
+            <button class="btn btn-success" id="downloadBtn" disabled>下载CSV</button>
+            <div id="loading" class="text-primary">
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                正在转换...
+            </div>
+        </div>
+        
+        <table id="resultTable" class="table table-striped">
+            <thead>
+                <tr>
+                    <th>序号</th>
+                    <th>纬度</th>
+                    <th>经度</th>
+                    <th>地址信息</th>
+                    <th>状态</th>
+                </tr>
+            </thead>
+            <tbody id="resultBody">
+            </tbody>
+        </table>
+    </div>
+    
+    <script>
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            const convertBtn = document.getElementById('convertBtn');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const latLngInput = document.getElementById('latLngInput');
+            const akInput = document.getElementById('akInput');
+            const resultBody = document.getElementById('resultBody');
+            const loading = document.getElementById('loading');
+            
+            // 存储转换结果
+            let convertResults = [];
+            
+            // 转换按钮点击事件
+            convertBtn.addEventListener('click', function() {
+                const ak = akInput.value.trim();
+                const latLngText = latLngInput.value.trim();
+                
+                if (!ak) {
+                    alert('请输入百度地图AK');
+                    return;
+                }
+                
+                if (!latLngText) {
+                    alert('请输入经纬度');
+                    return;
+                }
+                
+                // 解析经纬度列表
+                const latLngList = latLngText.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line)
+                    .map((line, index) => {
+                        const parts = line.split(',').map(part => part.trim());
+                        if (parts.length === 2) {
+                            const lat = parseFloat(parts[0]);
+                            const lng = parseFloat(parts[1]);
+                            if (!isNaN(lat) && !isNaN(lng)) {
+                                return { index: index + 1, lat: lat, lng: lng };
+                            }
+                        }
+                        return { index: index + 1, invalid: true, original: line };
+                    });
+                
+                if (latLngList.length === 0) {
+                    alert('没有有效的经纬度数据');
+                    return;
+                }
+                
+                // 清空结果
+                resultBody.innerHTML = '';
+                convertResults = [];
+                downloadBtn.disabled = true;
+                loading.style.display = 'inline-block';
+                
+                // 加载百度地图JSAPI
+                loadBMapJS(ak).then(() => {
+                    // 批量转换经纬度
+                    batchReverseGeocode(latLngList).then(results => {
+                        convertResults = results;
+                        displayResults(results);
+                        downloadBtn.disabled = false;
+                    }).catch(error => {
+                        console.error('转换失败:', error);
+                        alert('转换失败，请检查控制台错误信息');
+                    }).finally(() => {
+                        loading.style.display = 'none';
+                    });
+                }).catch(error => {
+                    console.error('加载百度地图API失败:', error);
+                    alert('加载百度地图API失败，请检查AK是否有效');
+                    loading.style.display = 'none';
+                });
+            });
+            
+            // 下载CSV按钮点击事件
+            downloadBtn.addEventListener('click', function() {
+                if (convertResults.length === 0) {
+                    alert('没有可下载的数据');
+                    return;
+                }
+                
+                // 生成CSV内容
+                let csvContent = '序号,纬度,经度,地址信息\n';
+                convertResults.forEach(item => {
+                    if (!item.invalid) {
+                        const row = [
+                            item.index,
+                            item.lat,
+                            item.lng,
+                            `"${item.address || ''}"`
+                        ];
+                        csvContent += row.join(',') + '\n';
+                    }
+                });
+                
+                // 创建Blob并下载
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                saveAs(blob, '经纬度地址转换结果.csv');
+            });
+            
+            // 加载百度地图JSAPI
+            function loadBMapJS(ak) {
+                return new Promise((resolve, reject) => {
+                    // 检查是否已经加载
+                    if (window.BMap) {
+                        resolve();
+                        return;
+                    }
+                    
+                    // 动态创建script标签
+                    const script = document.createElement('script');
+                    script.src = `https://api.map.baidu.com/api?v=3.0&ak=${ak}&callback=initBMap`;
+                    script.type = 'text/javascript';
+                    
+                    // 回调函数
+                    window.initBMap = function() {
+                        resolve();
+                    };
+                    
+                    // 加载失败处理
+                    script.onerror = function() {
+                        reject(new Error('百度地图API加载失败'));
+                    };
+                    
+                    document.head.appendChild(script);
+                });
+            }
+            
+            // 批量逆地理编码 - 添加了0.5秒间隔和最多两次重试机制
+            function batchReverseGeocode(latLngList) {
+                return new Promise((resolve, reject) => {
+                    const results = [];
+                    const total = latLngList.length;
+                    let currentIndex = 0;
+                    
+                    // 单个坐标逆地理编码（带重试）
+                    function reverseGeocodeWithRetry(item, retryCount = 0) {
+                        return new Promise((resolveItem, rejectItem) => {
+                            // 创建点坐标
+                            const point = new BMap.Point(item.lng, item.lat);
+                            
+                            // 创建逆地理编码实例
+                            const geoc = new BMap.Geocoder();
+                            
+                            // 执行逆地理编码
+                            geoc.getLocation(point, function(rs) {
+                                if (rs && rs.address) {
+                                    resolveItem({
+                                        ...item,
+                                        address: rs.address,
+                                        status: '成功'
+                                    });
+                                } else {
+                                    if (retryCount < 2) {
+                                        // 重试
+                                        setTimeout(() => {
+                                            reverseGeocodeWithRetry(item, retryCount + 1)
+                                                .then(resolveItem)
+                                                .catch(rejectItem);
+                                        }, 500); // 重试间隔0.5秒
+                                    } else {
+                                        // 超过最大重试次数
+                                        resolveItem({
+                                            ...item,
+                                            address: '',
+                                            status: '失败'
+                                        });
+                                    }
+                                }
+                            });
+                        });
+                    }
+                    
+                    // 处理下一个坐标
+                    async function processNext() {
+                        if (currentIndex >= total) {
+                            // 所有处理完成
+                            resolve(results);
+                            return;
+                        }
+                        
+                        const item = latLngList[currentIndex];
+                        currentIndex++;
+                        
+                        if (item.invalid) {
+                            results.push(item);
+                            // 立即处理下一个
+                            processNext();
+                        } else {
+                            try {
+                                // 逆地理编码（带重试）
+                                const result = await reverseGeocodeWithRetry(item);
+                                results.push(result);
+                                
+                                // 间隔0.5秒后处理下一个
+                                setTimeout(processNext, 500);
+                            } catch (error) {
+                                console.error('处理经纬度失败:', error);
+                                // 即使出错，也要继续处理下一个
+                                setTimeout(processNext, 500);
+                            }
+                        }
+                    }
+                    
+                    // 开始处理
+                    processNext();
+                });
+            }
+            
+            // 显示结果
+            function displayResults(results) {
+                resultBody.innerHTML = '';
+                
+                results.forEach(item => {
+                    const row = document.createElement('tr');
+                    
+                    if (item.invalid) {
+                        row.innerHTML = `
+                            <td>${item.index}</td>
+                            <td colspan="3" class="text-danger">格式错误：${item.original}</td>
+                            <td class="text-danger">失败</td>
+                        `;
+                    } else {
+                        row.innerHTML = `
+                            <td>${item.index}</td>
+                            <td>${item.lat}</td>
+                            <td>${item.lng}</td>
+                            <td>${item.address || ''}</td>
+                            <td class="${item.status === '成功' ? 'text-success' : 'text-danger'}">${item.status}</td>
+                        `;
+                    }
+                    
+                    resultBody.appendChild(row);
+                });
+            }
+        });
+    </script>
+</body>
+</html>

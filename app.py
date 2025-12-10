@@ -37,6 +37,8 @@ def process():
         return "读取Excel失败，仅支持xlsx格式", 400
     if lat_col not in df.columns or lng_col not in df.columns:
         return "经纬度列名不存在", 400
+    # 只处理前200条数据
+    df = df.head(200)
     def to_addr(row):
         try:
             lat = float(row[lat_col])
